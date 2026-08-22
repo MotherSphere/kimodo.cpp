@@ -23,6 +23,9 @@ import (
 //go:embed index.html
 var files embed.FS
 
+//go:embed assets/localai.png
+var localAILogo []byte
+
 type animation struct {
 	ID             string `json:"id"`
 	Prompt         string `json:"prompt"`
@@ -136,6 +139,11 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(index)
+	})
+	mux.HandleFunc("/localai.png", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(localAILogo)
 	})
 	mux.HandleFunc("/api/animations", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
