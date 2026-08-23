@@ -36,6 +36,16 @@ type animation struct {
 	Status         string `json:"status"`
 	Error          string `json:"error,omitempty"`
 	Kind           string `json:"kind"`
+	Model          string `json:"model"`
+}
+type motionModel struct {
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	Skeleton  string `json:"skeleton"`
+	Upstream  string `json:"upstream"`
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
+	Motion    string `json:"-"`
 }
 type gallery struct {
 	mu                      sync.RWMutex
@@ -43,6 +53,7 @@ type gallery struct {
 	output                  string
 	queue                   chan string
 	generator, motion, text string
+	models                  map[string]motionModel
 }
 
 func token() string {
@@ -83,11 +94,16 @@ func (g *gallery) worker() {
 			err = os.WriteFile(filepath.Join(dir, "prompt.txt"), []byte(item.Prompt), 0600)
 		}
 		if err == nil {
-			cmd := exec.Command(g.generator, g.motion, g.text, filepath.Join(dir, "prompt.txt"), fmt.Sprint(item.Frames), fmt.Sprint(item.DiffusionSteps), fmt.Sprint(item.Seed), dir)
-			cmd.Env = append(os.Environ(), "KIMODO_BACKEND=vulkan")
-			output, runErr := cmd.CombinedOutput()
-			if runErr != nil {
-				err = fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(output)))
+			model, ok := g.models[item.Model]
+			if !ok || !model.Available {
+				err = fmt.Errorf("model %q is not available", item.Model)
+			} else {
+				cmd := exec.Command(g.generator, model.Motion, g.text, filepath.Join(dir, "prompt.txt"), fmt.Sprint(item.Frames), fmt.Sprint(item.DiffusionSteps), fmt.Sprint(item.Seed), dir)
+				cmd.Env = append(os.Environ(), "KIMODO_BACKEND=vulkan")
+				output, runErr := cmd.CombinedOutput()
+				if runErr != nil {
+					err = fmt.Errorf("%w: %s", runErr, strings.TrimSpace(string(output)))
+				}
 			}
 		}
 		g.mu.Lock()
@@ -114,7 +130,14 @@ func main() {
 	if err := os.MkdirAll(*output, 0755); err != nil {
 		log.Fatal(err)
 	}
-	g := &gallery{items: map[string]*animation{}, output: *output, queue: make(chan string, 32), generator: *generator, motion: *motion, text: *text}
+	models := map[string]motionModel{
+		"smplx-rp-v1":    {ID: "smplx-rp-v1", Label: "SMPL-X RP v1", Skeleton: "SMPL-X 22 joints", Upstream: "nvidia/Kimodo-SMPLX-RP-v1", Available: true, Motion: *motion},
+		"soma-rp-v1.1":   {ID: "soma-rp-v1.1", Label: "SOMA RP v1.1", Skeleton: "SOMA 30 joints", Upstream: "nvidia/Kimodo-SOMA-RP-v1.1", Reason: "SOMA decoder and GGML conversion are being added"},
+		"soma-seed-v1.1": {ID: "soma-seed-v1.1", Label: "SOMA SEED v1.1", Skeleton: "SOMA 30 joints", Upstream: "nvidia/Kimodo-SOMA-SEED-v1.1", Reason: "SOMA decoder and GGML conversion are being added"},
+		"g1-rp-v1":       {ID: "g1-rp-v1", Label: "G1 RP v1", Skeleton: "Unitree G1 34 joints", Upstream: "nvidia/Kimodo-G1-RP-v1", Reason: "G1 decoder and GGML conversion are being added"},
+		"g1-seed-v1":     {ID: "g1-seed-v1", Label: "G1 SEED v1", Skeleton: "Unitree G1 34 joints", Upstream: "nvidia/Kimodo-G1-SEED-v1", Reason: "G1 decoder and GGML conversion are being added"},
+	}
+	g := &gallery{items: map[string]*animation{}, output: *output, queue: make(chan string, 32), generator: *generator, motion: *motion, text: *text, models: models}
 	entries, _ := filepath.Glob(filepath.Join(*output, "*.json"))
 	for _, path := range entries {
 		b, err := os.ReadFile(path)
@@ -149,6 +172,15 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(g.list())
 	})
+	mux.HandleFunc("/api/models", func(w http.ResponseWriter, r *http.Request) {
+		result := make([]motionModel, 0, len(g.models))
+		for _, model := range g.models {
+			result = append(result, model)
+		}
+		sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(result)
+	})
 	mux.HandleFunc("/api/generate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -160,6 +192,7 @@ func main() {
 			Frames int    `json:"frames"`
 			Steps  int    `json:"steps"`
 			Seed   uint64 `json:"seed"`
+			Model  string `json:"model"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&request); err != nil {
 			http.Error(w, "invalid JSON", 400)
@@ -180,7 +213,15 @@ func main() {
 			http.Error(w, "frames and steps must be 1..1000", 400)
 			return
 		}
-		a := &animation{ID: token(), Prompt: request.Prompt, Frames: request.Frames, DiffusionSteps: request.Steps, Seed: request.Seed, CreatedAt: time.Now().UTC().Format(time.RFC3339), Status: "queued", Kind: "generated"}
+		if request.Model == "" {
+			request.Model = "smplx-rp-v1"
+		}
+		model, ok := g.models[request.Model]
+		if !ok || !model.Available {
+			http.Error(w, "selected motion model is not available: "+model.Reason, http.StatusConflict)
+			return
+		}
+		a := &animation{ID: token(), Prompt: request.Prompt, Frames: request.Frames, DiffusionSteps: request.Steps, Seed: request.Seed, CreatedAt: time.Now().UTC().Format(time.RFC3339), Status: "queued", Kind: "generated", Model: request.Model}
 		g.mu.Lock()
 		g.items[a.ID] = a
 		err := g.save(a)

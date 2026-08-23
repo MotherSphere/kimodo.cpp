@@ -63,15 +63,18 @@ new generation.
 
 ## Weights
 
-The ready-to-run native GGUF bundle is published under the Hugging Face
-`LocalAI-io` organisation (not GitHub's `localai-org`). Download it directly;
-this avoids recreating the conversion locally:
+Ready-to-run native GGML weights are published under the Hugging Face
+`LocalAI-io` organisation (not GitHub's `localai-org`). The reusable
+[Llama-3-Kimodo-GGML](https://huggingface.co/LocalAI-io/Llama-3-Kimodo-GGML)
+text encoder and the upstream-linked
+[Kimodo-SMPLX-RP-v1-GGML](https://huggingface.co/LocalAI-io/Kimodo-SMPLX-RP-v1-GGML)
+diffusion model are separate, so users download rather than recreate them:
 
 ```sh
 nix develop path:. --command scripts/download_gguf_weights.sh --output "$PWD"
 ```
 
-The installer verifies the published manifest and SHA-256 hashes. Use
+The installer verifies each published manifest and SHA-256 hashes. Use
 `--motion-only` when supplying a precomputed 4096-float LLM2Vec embedding.
 
 The GGUF bundle includes converted Meta Llama 3 material and Kimodo is
@@ -101,7 +104,9 @@ Validate a prospective release without network access, then explicitly upload
 it from an account allowed to publish to `LocalAI-io`:
 
 ```sh
-nix develop path:. --command python scripts/publish_gguf.py
-nix develop path:. --command python scripts/publish_gguf.py \
+nix develop path:. --command python scripts/publish_gguf.py --component motion
+nix develop path:. --command python scripts/publish_gguf.py --component motion \
+  --upload --confirm-upstream-licences
+nix develop path:. --command python scripts/publish_gguf.py --component text \
   --upload --confirm-upstream-licences
 ```
