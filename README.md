@@ -51,7 +51,7 @@ translations and local XYZW rotations.
 
 ## Demo
 
-After building the debug preset and converting the text bundle:
+After building the debug preset and downloading the native GGUF bundle:
 
 ```sh
 go run ./demo -addr 0.0.0.0:8094
@@ -61,11 +61,28 @@ Open `http://localhost:8094`. The left sidebar contains the prompt and a
 persistent history; choosing a previous animation restores its prompt for a
 new generation.
 
-## Licensed weights
+## Weights
 
-The SMPL-X checkpoint and Llama base model are gated. After accepting their
-Hugging Face licences and authenticating, download the exact revisions and
-hash manifests with:
+The ready-to-run native GGUF bundle is published under the Hugging Face
+`LocalAI-io` organisation (not GitHub's `localai-org`). Download it directly;
+this avoids recreating the conversion locally:
+
+```sh
+nix develop path:. --command scripts/download_gguf_weights.sh --output "$PWD"
+```
+
+The installer verifies the published manifest and SHA-256 hashes. Use
+`--motion-only` when supplying a precomputed 4096-float LLM2Vec embedding.
+
+The GGUF bundle includes converted Meta Llama 3 material and Kimodo is
+non-commercial research-only. Review the published model card and upstream
+licences before downloading or redistributing.
+
+### Regenerating the bundle
+
+This is only needed to reproduce a conversion. The SMPL-X checkpoint and Llama
+base model are gated. After accepting their Hugging Face licences and
+authenticating, download the exact revisions and hash manifests with:
 
 ```sh
 nix develop path:. --command hf auth login
@@ -78,4 +95,13 @@ Convert the local LLM2Vec model to the native component bundle with:
 ```sh
 nix develop path:. --command scripts/convert_llm2vec_bundle.sh \
   "$PWD/models/llama3-8b-instruct-base" "$PWD/generated/llm2vec-text-bundle"
+```
+
+Validate a prospective release without network access, then explicitly upload
+it from an account allowed to publish to `LocalAI-io`:
+
+```sh
+nix develop path:. --command python scripts/publish_gguf.py
+nix develop path:. --command python scripts/publish_gguf.py \
+  --upload --confirm-upstream-licences
 ```

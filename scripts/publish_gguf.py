@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Publish the reproducible Kimodo GGUF distribution to Hugging Face.
+
+The default is deliberately a dry run: it validates the exact converter
+outputs, prints every path, size and SHA-256, and performs no network I/O.
+Use --upload only after reviewing the upstream licence obligations.
+
+The text bundle contains merged Meta Llama 3 weights.  It is therefore kept in
+the same repository as the Kimodo motion GGUF and is published under the model
+name required by the Meta Llama 3 Community License:
+
+    LocalAI-io/Llama-3-Kimodo-SMPLX-RP-v1-GGUF
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import io
+import json
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent
+HF_ORG = "LocalAI-io"  # Hugging Face organisation; GitHub is localai-org.
+DEFAULT_REPO = f"{HF_ORG}/Llama-3-Kimodo-SMPLX-RP-v1-GGUF"
+MOTION_NAME = "kimodo-smplx-rp-v1-f32.gguf"
+TEXT_NAMES = (
+    "tokenizer.gguf", "embedding.gguf", "final-norm.gguf",
+    *(f"layer-{index:02d}.gguf" for index in range(32)),
+)
+SOURCE_REVISIONS = {
+    "nvidia/Kimodo-SMPLX-RP-v1": "1419ba56b734c48bbafb41fefa84088ca94583b5",
+    "meta-llama/Meta-Llama-3-8B-Instruct": "8afb486c1db24fe5011ec46dfbe5b5dccdb575c2",
+    "McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp": "31474e395ada192e8ed1586db6be79fb3b70c9c0",
+    "McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised": "baa8ebf04a1c2500e61288e7dad65e8ae42601a7",
+}
+CARD = ROOT / "scripts/hf/Llama-3-Kimodo-SMPLX-RP-v1-GGUF/README.md"
+NOTICE = ROOT / "scripts/hf/Llama-3-Kimodo-SMPLX-RP-v1-GGUF/NOTICE"
+LLAMA_LICENSE = ROOT / "models/llama3-8b-instruct-base/LICENSE"
+
+
+def digest(path: Path) -> str:
+    value = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def require_revision(repo: str) -> None:
+    revision = ROOT / "models" / {
+        "nvidia/Kimodo-SMPLX-RP-v1": "Kimodo-SMPLX-RP-v1",
+        "meta-llama/Meta-Llama-3-8B-Instruct": "llama3-8b-instruct-base",
+        "McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp": "llm2vec-mntp-adapter",
+        "McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp-supervised": "llm2vec-adapter",
+    }[repo] / "REVISION"
+    if not revision.is_file():
+        raise ValueError(f"missing provenance file: {revision}")
+    actual = revision.read_text(encoding="utf-8").split()[0]
+    if actual != SOURCE_REVISIONS[repo]:
+        raise ValueError(f"unexpected {repo} revision: {actual} (expected {SOURCE_REVISIONS[repo]})")
+
+
+def artifacts(motion: Path, bundle: Path) -> list[tuple[Path, str]]:
+    result = [(motion, f"models/{MOTION_NAME}")]
+    result.extend((bundle / name, f"generated/llm2vec-text-bundle/{name}") for name in TEXT_NAMES)
+    for source, destination in result:
+        if not source.is_file() or source.stat().st_size == 0:
+            raise ValueError(f"missing or empty GGUF: {source}")
+        if source.suffix != ".gguf":
+            raise ValueError(f"not a GGUF: {source}")
+        with source.open("rb") as handle:
+            if handle.read(4) != b"GGUF":
+                raise ValueError(f"invalid GGUF magic: {source}")
+        if ".." in Path(destination).parts:
+            raise ValueError(f"unsafe destination: {destination}")
+    return result
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--motion", type=Path, default=ROOT / "models" / MOTION_NAME)
+    parser.add_argument("--text-bundle", type=Path,
+                        default=ROOT / "generated/llm2vec-text-bundle")
+    parser.add_argument("--repo", default=DEFAULT_REPO)
+    parser.add_argument("--upload", action="store_true",
+                        help="actually create/update the Hugging Face model repo")
+    parser.add_argument("--confirm-upstream-licences", action="store_true",
+                        help="required with --upload; confirms authority to redistribute all inputs")
+    args = parser.parse_args()
+
+    try:
+        if not CARD.is_file() or not NOTICE.is_file() or not LLAMA_LICENSE.is_file():
+            raise ValueError("model card, NOTICE, or Meta Llama 3 licence is missing")
+        for repo in SOURCE_REVISIONS:
+            require_revision(repo)
+        files = artifacts(args.motion, args.text_bundle)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+
+    entries = []
+    for source, destination in files:
+        entries.append({"path": destination, "bytes": source.stat().st_size, "sha256": digest(source)})
+    manifest = {
+        "format": "kimodo-gguf-manifest-v1",
+        "repository": args.repo,
+        "source_revisions": SOURCE_REVISIONS,
+        "files": entries,
+    }
+    sums = "".join(f"{entry['sha256']}  {entry['path']}\n" for entry in entries)
+    total = sum(entry["bytes"] for entry in entries)
+
+    print(f"repo:  https://huggingface.co/{args.repo}")
+    print(f"files: {len(entries)} GGUFs, {total / 1e9:.2f} GB")
+    for entry in entries:
+        print(f"  {entry['sha256']}  {entry['bytes']:>12}  {entry['path']}")
+    if not args.upload:
+        print("\n[dry-run] nothing uploaded. Re-run with --upload --confirm-upstream-licences to publish.")
+        return 0
+    if not args.confirm_upstream_licences:
+        print("error: --upload requires --confirm-upstream-licences", file=sys.stderr)
+        return 2
+
+    from huggingface_hub import HfApi
+    api = HfApi()
+    api.create_repo(args.repo, repo_type="model", exist_ok=True)
+    uploads = [(CARD, "README.md"), (NOTICE, "NOTICE"),
+               (LLAMA_LICENSE, "LICENSE-META-LLAMA-3.txt")]
+    for source, destination in uploads + files:
+        print(f"uploading {destination} ...", flush=True)
+        api.upload_file(path_or_fileobj=str(source), path_in_repo=destination,
+                        repo_id=args.repo, repo_type="model",
+                        commit_message=f"Add {destination}")
+    for payload, destination in ((json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n", "MANIFEST.json"),
+                                 (sums.encode(), "SHA256SUMS")):
+        print(f"uploading {destination} ...", flush=True)
+        api.upload_file(path_or_fileobj=io.BytesIO(payload), path_in_repo=destination,
+                        repo_id=args.repo, repo_type="model",
+                        commit_message=f"Add {destination}")
+    print(f"done -> https://huggingface.co/{args.repo}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
