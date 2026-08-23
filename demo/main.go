@@ -23,6 +23,9 @@ import (
 //go:embed index.html
 var files embed.FS
 
+//go:embed models.js
+var modelUI []byte
+
 //go:embed assets/localai.png
 var localAILogo []byte
 
@@ -167,6 +170,11 @@ func main() {
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		_, _ = w.Write(localAILogo)
+	})
+	mux.HandleFunc("/models.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(modelUI)
 	})
 	mux.HandleFunc("/api/animations", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
