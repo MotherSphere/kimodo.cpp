@@ -1,6 +1,8 @@
 ---
 license: other
 library_name: ggml
+base_model: nvidia/Kimodo-SMPLX-RP-v1
+base_model_relation: quantized
 tags: [gguf, ggml, text-to-motion, smplx, kimodo]
 ---
 
