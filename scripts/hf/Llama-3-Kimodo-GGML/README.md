@@ -11,10 +11,10 @@ reusable LLM2Vec encoder only; download a matching Kimodo diffusion model
 separately, for example
 [`Kimodo-SMPLX-RP-v1-GGML`](https://huggingface.co/LocalAI-io/Kimodo-SMPLX-RP-v1-GGML).
 
-From a kimodo.cpp checkout, install both with:
+From a kimodo.cpp checkout with the Hugging Face CLI installed, install both with:
 
 ```sh
-nix develop path:. --command scripts/download_gguf_weights.sh --output "$PWD"
+scripts/download_gguf_weights.sh --output "$PWD"
 ```
 
 The components intentionally remain split into individual layers so kimodo.cpp

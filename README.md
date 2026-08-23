@@ -13,20 +13,30 @@ Included: checked GGUF loading, safetensors conversion, DDIM sampling, C/C++
 APIs, CPU/Vulkan parity tests, and a local text-to-motion demo. Constraints,
 SOMA, G1, GLB export, and quantised models are not implemented yet.
 
-## Build and test
+## Build and test on Linux
 
-GGML is a pinned Git submodule:
+Install a C++23 compiler, CMake 3.25+, Ninja, Python 3 with the Hugging Face
+CLI (`pip install huggingface_hub`), and the Vulkan loader/headers for Vulkan
+support. GGML is a pinned Git submodule:
 
 ```sh
 git submodule update --init --recursive
-nix develop path:. --command cmake --preset debug
-nix develop path:. --command cmake --build --preset debug
-nix develop path:. --command ctest --preset debug
+scripts/download_gguf_weights.sh --output "$PWD"
+cmake --preset debug
+cmake --build --preset debug
+ctest --preset debug
 ```
 
 The standard test suite requires the local motion GGUF, text bundle, and
 fixtures. It never downloads weights by itself. `release`, `asan-ubsan`, and
 `fuzz` presets are also available.
+
+Nix is optional and provides these dependencies reproducibly:
+
+```sh
+nix develop path:. --command cmake --preset debug
+nix develop path:. --command cmake --build --preset debug
+```
 
 For sanitizer work:
 
@@ -71,7 +81,7 @@ text encoder and the upstream-linked
 diffusion model are separate, so users download rather than recreate them:
 
 ```sh
-nix develop path:. --command scripts/download_gguf_weights.sh --output "$PWD"
+scripts/download_gguf_weights.sh --output "$PWD"
 ```
 
 The installer verifies each published manifest and SHA-256 hashes. Use

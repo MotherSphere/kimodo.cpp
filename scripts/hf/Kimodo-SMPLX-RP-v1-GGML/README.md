@@ -15,10 +15,10 @@ This repository contains only the diffusion model; its reusable Llama-derived
 text encoder is distributed separately as
 [`Llama-3-Kimodo-GGML`](https://huggingface.co/LocalAI-io/Llama-3-Kimodo-GGML).
 
-From a kimodo.cpp checkout, install both with:
+From a kimodo.cpp checkout with the Hugging Face CLI installed, install both with:
 
 ```sh
-nix develop path:. --command scripts/download_gguf_weights.sh --output "$PWD"
+scripts/download_gguf_weights.sh --output "$PWD"
 ```
 
 The model is installed at `models/kimodo-smplx-rp-v1-f32.gguf`. Use
